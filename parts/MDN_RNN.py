@@ -6,7 +6,7 @@ import numpy as np
 class MDN(nn.Module):
     def __init__(self, input_size, num_dist, latent_size, temperature): # Need to add controller parameters
         super().__init__()
-        self.input_size = input_size # It is the output vector size of the rnn
+        self.input_size = input_size # It is the output vector size of the RNN
         self.num_dist = num_dist
         self.latent_size = latent_size
         self.tau = temperature
@@ -34,19 +34,12 @@ class MDN_RNN(nn.Module):
     def __init__(self, input_size, action_size, hidden_size, latent_space_size=512, num_dist=3, temperature=1): # latent_space_size is fixed at 512. Do not change this parameter
         super().__init__()
         self.input_size = input_size
-        self.num_dist = num_dist
+        self.num_dist = num_dist # number of gaussian distrunutions in the GMM
         self.action_size = action_size
-        self.hidden_size = hidden_size
+        self.hidden_size = hidden_size # hidden state size of lstm
 
         self.lstm = nn.LSTM(input_size=input_size+action_size, hidden_size=hidden_size, num_layers=3, batch_first=True)
         self.mdn = MDN(input_size=hidden_size, num_dist=num_dist, latent_size=latent_space_size, temperature=temperature)
-    
-    def sampling(self, mu, sigma, phi):
-        mixture_distribution = distributions.Categorical(probs=phi)
-        component_distribution = distributions.Normal(loc=mu, scale=sigma)
-        mixture_gaussian = distributions.MixtureSameFamily(mixture_distribution, component_distribution)
-
-        return mixture_gaussian.sample()
 
     def forward(self, input_z_vector, a_t_onehot):
         vector_sequence = torch.cat([input_z_vector, a_t_onehot], dim=2)
@@ -54,6 +47,24 @@ class MDN_RNN(nn.Module):
 
         mu, sigma, phi = self.mdn(output)
 
-        z_t1 = self.sampling(mu, sigma, phi)
+        return mu, sigma, phi
+    
+def sampling(mu, sigma, phi):
+    mixture_distribution = distributions.Categorical(probs=phi)
+    component_distribution = distributions.Normal(loc=mu, scale=sigma)
+    mixture_gaussian = distributions.MixtureSameFamily(mixture_distribution, component_distribution)
 
-        return z_t1
+    return mixture_gaussian.sample()
+
+def mdn_rnn_loss(mu, sigma, phi, target):
+    dist = distributions.Normal(loc=mu, scale=sigma)
+    target = target.unsqueeze(1)
+    log_prob = dist.log_prob(target)
+    joint_log_prob = log_prob.sum(dim=-1)
+    log_phi = torch.log(phi) 
+
+    weighted_log_prob = log_phi + joint_log_prob # originally prob * phi, but log_prob + log_phi since we're in log-space
+    log_likelihood = torch.logsumexp(weighted_log_prob, dim=-1)
+
+    return -log_likelihood.mean()
+

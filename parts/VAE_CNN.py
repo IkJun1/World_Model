@@ -66,7 +66,7 @@ class VAE(nn.Module):
         output = self.decode(latent_vector)
         return latent_vector, output, mu, log_var
 
-def loss_function(input, output, mu, log_var):
+def vae_loss_function(input, output, mu, log_var):
     BCE = F.binary_cross_entropy(output, input, reduction='none')
     BCE = torch.sum(BCE, dim=[1, 2, 3])
 

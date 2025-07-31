@@ -8,14 +8,14 @@ and the environment uses the corresponding action value.
 '''
 
 class controller(nn.Module):
-    def __init__(self, action:list, z_vector_size, h_vector_size, hidden_size):
+    def __init__(self, action_size, z_vector_size, h_vector_size, hidden_size):
         super().__init__()
-        self.action = action
-        self.z_vector_size = z_vector_size
-        self.h_vector_size = h_vector_size
+        self.action_size = action_size
+        self.z_vector_size = z_vector_size # latent_space of VAE
+        self.h_vector_size = h_vector_size # hidden_state of RNN
 
         self.input_linear = nn.Linear(z_vector_size+h_vector_size, hidden_size)
-        self.output_linear = nn.Linear(hidden_size, len(action))
+        self.output_linear = nn.Linear(hidden_size, action_size)
 
         self.softmax = nn.Softmax(-1)
 
@@ -30,5 +30,3 @@ class controller(nn.Module):
 def choice_control(p):
     action_indices = torch.multinomial(p, num_samples=1)
     return action_indices
-    
-

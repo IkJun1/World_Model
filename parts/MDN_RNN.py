@@ -84,7 +84,8 @@ class SequenceDataset(Dataset):
     
     def __getitem__(self, idx):
         images = self.images[idx: idx+self.length]
-        images = [self.transforms(image) for image in images]
+        images_transform = [self.transforms(image) for image in images]
+        images_tensor = torch.stack(images_transform)
         actions = self.actions[idx: idx+self.length]
 
-        return images, actions
+        return images_tensor, torch.tensor(actions, dtype=torch.float32)

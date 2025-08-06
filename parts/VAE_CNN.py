@@ -4,35 +4,35 @@ from torch.utils.data import Dataset
 from torch.nn import functional as F
 
 class VAE(nn.Module):
-    def __init__(self, input_channel, latent_dim=256):
+    def __init__(self, input_channel, latent_dim):
         super().__init__()
         self.input_channel = input_channel
         self.latent_dim = latent_dim
 
         self.encode_cnn = nn.Sequential( # input image size is 64*64
-            nn.Conv2d(input_channel, 8, kernel_size=4, stride=2, padding=1), # 64-> 32
+            nn.Conv2d(input_channel, 32, kernel_size=4, stride=2, padding=1), # 64-> 32
             nn.SiLU(),
-            nn.Conv2d(8, 16, kernel_size=4, stride=2, padding=1), # 32 -> 16
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1), # 32 -> 16
             nn.SiLU(),
-            nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1), # 16 -> 8
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # 16 -> 8
             nn.SiLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1), # 8 -> 4
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # 8 -> 4
             nn.SiLU()
         ) 
 
-        self.mu_linear = nn.Linear(1024, latent_dim)
-        self.var_linear = nn.Linear(1024, latent_dim)
+        self.mu_linear = nn.Linear(4096, latent_dim)
+        self.var_linear = nn.Linear(4096, latent_dim)
 
-        self.decode_linear = nn.Linear(latent_dim, 1024)
+        self.decode_linear = nn.Linear(latent_dim, 4096)
 
         self.decode_cnn = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
+            nn.SiLU(),
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.SiLU(),
             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
             nn.SiLU(),
-            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),
-            nn.SiLU(),
-            nn.ConvTranspose2d(16, 8, kernel_size=4, stride=2, padding=1),
-            nn.SiLU(),
-            nn.ConvTranspose2d(8, input_channel, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(32, input_channel, kernel_size=4, stride=2, padding=1),
             nn.Sigmoid()
         )
 
@@ -53,7 +53,7 @@ class VAE(nn.Module):
         
     def decode(self, latent_vector):
         v = self.decode_linear(latent_vector)
-        v = v.view(-1, 64, 4, 4)
+        v = v.view(-1, 256, 4, 4)
         generate_image = self.decode_cnn(v)
         return generate_image
 

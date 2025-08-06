@@ -70,7 +70,7 @@ def sampling(mu, sigma, phi):
     return mixture_gaussian.sample()
 
 def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, reward_weights=1): # p_reward is predicted reward by the model, t_reward is target reward
-    dist = distributions.Normal(loc=mu, scale=sigma)
+    dist = distributions.Normal(loc=mu, scale=sigma) # this dimension is have to same of the target dimension
     target = target.unsqueeze(1)
     log_prob = dist.log_prob(target)
     joint_log_prob = log_prob.sum(dim=-1)

@@ -44,9 +44,9 @@ class MDN_RNN(nn.Module):
         self.mdn = MDN(input_size=hidden_size, num_dist=num_dist, latent_size=latent_space_size, temperature=temperature)
         self.reward_linear = nn.Linear(hidden_size, 1)
 
-    def forward(self, input_z_vector, a_t_onehot):
+    def forward(self, input_z_vector, a_t_onehot, pre_hidden=None):
         vector_sequence = torch.cat([input_z_vector, a_t_onehot], dim=2)
-        output, _ = self.lstm(vector_sequence)
+        output, (h_n, c_n) = self.lstm(vector_sequence, pre_hidden)
         B, Seq, hidden_size = output.size()
         output = output.reshape(-1, hidden_size) # predict at hidden states of all sequences
 
@@ -56,7 +56,7 @@ class MDN_RNN(nn.Module):
         reward = self.reward_linear(output)
         reward = reward.view(B, Seq)
 
-        return mu, sigma, phi, reward, output
+        return mu, sigma, phi, reward, output, (h_n, c_n)
     
 def sampling(mu, sigma, phi):
     mixture_distribution = distributions.Categorical(probs=phi)

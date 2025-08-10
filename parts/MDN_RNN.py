@@ -84,22 +84,36 @@ def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, reward_weights=1): 
     return -log_likelihood.mean() + reward_weights*mse
 
 class SequenceDataset(Dataset):
-    def __init__(self, image_dataset, transforms, action_dataset, reward_dataset, sequence_length=1000):
+    def __init__(self, image_dataset, transforms, action_dataset, reward_dataset, episodes):
+        # self.H, self.W, self. C = image_dataset[0].shape
         self.images = image_dataset
         self.actions = action_dataset
         self.rewards = reward_dataset
+        self.episodes = episodes
 
-        self.length = sequence_length
+        self.epi_length = [episodes[i+1]-episodes[i] for i in range(len(episodes)-1)]
+        self.max_length = max(self.epi_length)
+
+        self.length = self.max_length
+
         self.transforms = transforms
 
     def __len__(self):
-        return len(self.images)-self.length
+        return len(self.epi_length)-1 # not use the last sequence (because incomplete)
     
     def __getitem__(self, idx):
-        images = self.images[idx: idx+self.length]
-        images_transform = [self.transforms(image) for image in images]
-        images_tensor = torch.stack(images_transform)
-        actions = self.actions[idx: idx+self.length]
-        rewards = self.rewards[idx: idx+self.length]
+        image_seq = self.images[self.episodes[idx]: self.episodes[idx+1]]
+        images_padded = np.pad(image_seq, ((0, self.max_length-self.epi_length[idx]), (0, 0), (0, 0), (0, 0)), mode='constant', constant_values=0)
 
-        return images_tensor, torch.tensor(actions, dtype=torch.float32), torch.tensor(rewards, dtype=torch.float32)
+        images_transform = [self.transforms(image) for image in images_padded]
+        images_tensor = torch.stack(images_transform)
+
+        action_seq = self.actions[self.episodes[idx]: self.episodes[idx+1]]
+        actions_padded = np.pad(action_seq, (0, self.max_length-self.epi_length[idx]), mode='constant', constant_values=0)
+
+        reward_seq = self.rewards[self.episodes[idx]: self.episodes[idx+1]]
+        rewards_padded = np.pad(reward_seq, (0, self.max_length-self.epi_length[idx]), mode='constant', constant_values=0)
+
+        seq_length = self.epi_length[idx]
+
+        return images_tensor, torch.tensor(actions_padded, dtype=torch.float32), torch.tensor(rewards_padded, dtype=torch.float32), torch.tensor(seq_length, dtype=torch.int64)

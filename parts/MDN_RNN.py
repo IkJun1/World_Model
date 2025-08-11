@@ -3,6 +3,7 @@ from torch import nn
 from torch import distributions
 from torch.nn import functional as F
 from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import numpy as np
 
 class MDN(nn.Module):
@@ -44,9 +45,19 @@ class MDN_RNN(nn.Module):
         self.mdn = MDN(input_size=hidden_size, num_dist=num_dist, latent_size=latent_space_size, temperature=temperature)
         self.reward_linear = nn.Linear(hidden_size, 1)
 
-    def forward(self, input_z_vector, a_t_onehot, pre_hidden=None):
+    def forward(self, input_z_vector, a_t_onehot, pre_hidden=None, length=None):
+        max_seq_len = input_z_vector.size(1)
+        
         vector_sequence = torch.cat([input_z_vector, a_t_onehot], dim=2)
+
+        if length is not None:
+            vector_sequence = pack_padded_sequence(vector_sequence, length, batch_first=True, enforce_sorted=False)
+
         output, (h_n, c_n) = self.lstm(vector_sequence, pre_hidden)
+
+        if length is not None:
+            output, _ = pad_packed_sequence(output, batch_first=True, total_length=max_seq_len)
+
         B, Seq, hidden_size = output.size()
         output = output.reshape(-1, hidden_size) # predict at hidden states of all sequences
 
@@ -69,7 +80,7 @@ def sampling(mu, sigma, phi):
 
     return mixture_gaussian.sample()
 
-def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, reward_weights=1): # p_reward is predicted reward by the model, t_reward is target reward
+def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, mask=None, reward_weights=1): # p_reward is predicted reward by the model, t_reward is target reward
     dist = distributions.Normal(loc=mu, scale=sigma) # this dimension is have to same of the target dimension
     target = target.unsqueeze(1)
     log_prob = dist.log_prob(target)
@@ -79,9 +90,20 @@ def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, reward_weights=1): 
     weighted_log_prob = log_phi + joint_log_prob # originally prob * phi, but log_prob + log_phi since we're in log-space
     log_likelihood = torch.logsumexp(weighted_log_prob, dim=-1)
 
-    mse = F.mse_loss(p_reward, t_reward)
+    mse = F.mse_loss(p_reward, t_reward, reduction='none')
 
-    return -log_likelihood.mean() + reward_weights*mse
+    if mask != None:
+        mse = mse*mask
+        log_likelihood = log_likelihood*mask
+
+        n_mask = mask.sum()
+
+        mean_mse = mse.sum()/n_mask
+        mean_log_likelihood = log_likelihood.sum()/n_mask
+
+        return -mean_log_likelihood + reward_weights*mean_mse
+
+    return -log_likelihood.mean() + reward_weights*mse.mean()
 
 class SequenceDataset(Dataset):
     def __init__(self, image_dataset, transforms, action_dataset, reward_dataset, episodes):
@@ -94,12 +116,10 @@ class SequenceDataset(Dataset):
         self.epi_length = [episodes[i+1]-episodes[i] for i in range(len(episodes)-1)]
         self.max_length = max(self.epi_length)
 
-        self.length = self.max_length
-
         self.transforms = transforms
 
     def __len__(self):
-        return len(self.epi_length)-1 # not use the last sequence (because incomplete)
+        return len(self.epi_length)-2 # not use the last sequence (because incomplete)
     
     def __getitem__(self, idx):
         image_seq = self.images[self.episodes[idx]: self.episodes[idx+1]]
@@ -109,11 +129,14 @@ class SequenceDataset(Dataset):
         images_tensor = torch.stack(images_transform)
 
         action_seq = self.actions[self.episodes[idx]: self.episodes[idx+1]]
-        actions_padded = np.pad(action_seq, (0, self.max_length-self.epi_length[idx]), mode='constant', constant_values=0)
+        actions_padded = np.pad(action_seq, ((0, self.max_length-self.epi_length[idx]), (0, 0)), mode='constant', constant_values=0)
 
         reward_seq = self.rewards[self.episodes[idx]: self.episodes[idx+1]]
         rewards_padded = np.pad(reward_seq, (0, self.max_length-self.epi_length[idx]), mode='constant', constant_values=0)
 
-        seq_length = self.epi_length[idx]
+        seq_length = self.epi_length[idx]-1
 
-        return images_tensor, torch.tensor(actions_padded, dtype=torch.float32), torch.tensor(rewards_padded, dtype=torch.float32), torch.tensor(seq_length, dtype=torch.int64)
+        mask = torch.zeros(self.max_length-1)
+        mask[:seq_length+1] = 1
+
+        return images_tensor, torch.tensor(actions_padded, dtype=torch.float32), torch.tensor(rewards_padded, dtype=torch.float32), torch.tensor(seq_length, dtype=torch.int64), mask

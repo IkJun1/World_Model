@@ -1,1 +1,2 @@
-코드 작성 기록 저장
+This repository documents the learning process of the World Model.
+

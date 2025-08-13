@@ -1,12 +1,6 @@
 import torch
 from torch import nn
 
-'''
-The action is list. 
-The neural network receives the list index as input, 
-and the environment uses the corresponding action value.
-'''
-
 class controller(nn.Module):
     def __init__(self, action_size, z_vector_size, h_vector_size, hidden_size):
         super().__init__()

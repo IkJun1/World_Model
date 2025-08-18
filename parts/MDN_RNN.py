@@ -44,6 +44,8 @@ class MDN_RNN(nn.Module):
         self.lstm = nn.LSTM(input_size=input_size+action_size, hidden_size=hidden_size, num_layers=3, batch_first=True)
         self.mdn = MDN(input_size=hidden_size, num_dist=num_dist, latent_size=latent_space_size, temperature=temperature)
         self.reward_linear = nn.Linear(hidden_size, 1)
+        self.done_linear = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, input_z_vector, a_t_onehot, pre_hidden=None, length=None):
         max_seq_len = input_z_vector.size(1)
@@ -67,7 +69,11 @@ class MDN_RNN(nn.Module):
         reward = self.reward_linear(output)
         reward = reward.view(B, Seq)
 
-        return mu, sigma, phi, reward, output, (h_n, c_n)
+        done = self.done_linear(output)
+        done = self.sigmoid(done)
+        done = done.view(B, Seq)
+
+        return mu, sigma, phi, reward, done, output, (h_n, c_n)
     
 def sampling(mu, sigma, phi):
     mixture_distribution = distributions.Categorical(probs=phi)
@@ -80,7 +86,7 @@ def sampling(mu, sigma, phi):
 
     return mixture_gaussian.sample()
 
-def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, mask=None, reward_weights=1): # p_reward is predicted reward by the model, t_reward is target reward
+def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, p_done, t_done, mask=None, reward_weights=1): # p_reward is predicted reward by the model, t_reward is target reward
     dist = distributions.Normal(loc=mu, scale=sigma) # this dimension is have to same of the target dimension
     target = target.unsqueeze(1)
     log_prob = dist.log_prob(target)
@@ -92,7 +98,9 @@ def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, mask=None, reward_w
 
     mse = F.mse_loss(p_reward, t_reward, reduction='none')
 
-    if mask != None:
+    done_bce = F.binary_cross_entropy(p_done, t_done, reduction='none')
+
+    if mask is not None:
         mse = mse*mask
         log_likelihood = log_likelihood*mask
 
@@ -100,10 +108,11 @@ def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, mask=None, reward_w
 
         mean_mse = mse.sum()/n_mask
         mean_log_likelihood = log_likelihood.sum()/n_mask
+        done_bce = done_bce.sum()/n_mask
 
-        return -mean_log_likelihood + reward_weights*mean_mse
+        return -mean_log_likelihood + reward_weights*mean_mse + done_bce
 
-    return -log_likelihood.mean() + reward_weights*mse.mean()
+    return -log_likelihood.mean() + reward_weights*mse.mean() + done_bce.mean()
 
 class SequenceDataset(Dataset):
     def __init__(self, image_dataset, transforms, action_dataset, reward_dataset, episodes):
@@ -139,4 +148,7 @@ class SequenceDataset(Dataset):
         mask = torch.zeros(self.max_length-1)
         mask[:seq_length+1] = 1
 
-        return images_tensor, torch.tensor(actions_padded, dtype=torch.float32), torch.tensor(rewards_padded, dtype=torch.float32), torch.tensor(seq_length, dtype=torch.int64), mask
+        done = torch.zeros(self.max_length)
+        done[self.epi_length[idx]-1] = 1
+
+        return images_tensor, torch.tensor(actions_padded, dtype=torch.float32), torch.tensor(rewards_padded, dtype=torch.float32), torch.tensor(seq_length, dtype=torch.int64), mask, done

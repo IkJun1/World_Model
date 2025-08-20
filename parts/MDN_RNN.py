@@ -1,3 +1,4 @@
+from turtle import pos
 import torch
 from torch import nn
 from torch import distributions
@@ -5,6 +6,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import numpy as np
+import math
 
 class MDN(nn.Module):
     def __init__(self, input_size, num_dist, latent_size, temperature):
@@ -84,7 +86,7 @@ def sampling(mu, sigma, phi):
 
     return mixture_gaussian.sample()
 
-def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, p_done, t_done, mask=None, likelihood_weights=1e-6, reward_weights=0.05, done_weights=10.0): # p_reward is predicted reward by the model, t_reward is target reward
+def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, p_done, t_done, done_weights=None, mask=None, likelihood_weight=1e-6, reward_weight=0.05, done_weight=10.0): # p_reward is predicted reward by the model, t_reward is target reward
     dist = distributions.Normal(loc=mu, scale=sigma) # this dimension is have to same of the target dimension
     target = target.unsqueeze(1)
     log_prob = dist.log_prob(target)
@@ -96,8 +98,9 @@ def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, p_done, t_done, mas
 
     mse = F.mse_loss(p_reward, t_reward, reduction='none')
 
-    pos_weight = torch.tensor([len(p_done[0])-1], device=p_done.device, dtype=p_done.dtype)
+    pos_weight = torch.tensor([141], device=p_done.device, dtype=p_done.dtype)
     done_bce = F.binary_cross_entropy_with_logits(p_done, t_done, reduction='none', pos_weight=pos_weight)
+    done_bce = done_bce*done_weights
 
     if mask is not None:
         mse = mse*mask
@@ -111,11 +114,11 @@ def mdn_rnn_loss(mu, sigma, phi, target, p_reward, t_reward, p_done, t_done, mas
         done_bce = done_bce.sum()/n_mask
 
         #print(f'mse: {mean_mse.item()}, log_likelihood: {mean_log_likelihood.item()}, done_bce: {done_bce.item()}')
-        #print(f'likelihood_weights: {likelihood_weights*mean_log_likelihood.item()}, reward_weights: {reward_weights*mean_mse.item()}, done_weights: {done_weights*done_bce.item()}')
+        #print(f'likelihood_weight: {likelihood_weight*mean_log_likelihood.item()}, reward_weight: {reward_weight*mean_mse.item()}, done_weight: {done_weight*done_bce.item()}')
 
-        return -likelihood_weights*mean_log_likelihood + reward_weights*mean_mse + done_weights*done_bce
+        return -likelihood_weight*mean_log_likelihood + reward_weight*mean_mse + done_weight*done_bce, (-likelihood_weight*mean_log_likelihood, reward_weight*mean_mse, done_weight*done_bce)
 
-    return -likelihood_weights*log_likelihood.mean() + reward_weights*mse.mean() + done_weights*done_bce.mean()
+    return -likelihood_weight*log_likelihood.mean() + reward_weight*mse.mean() + done_weight*done_bce.mean()
 
 class SequenceDataset(Dataset):
     def __init__(self, image_dataset, transforms, action_dataset, reward_dataset, episodes):

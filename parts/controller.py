@@ -10,6 +10,7 @@ class controller(nn.Module):
 
         self.input_linear = nn.Linear(z_vector_size+h_vector_size, hidden_size)
         self.output_linear = nn.Linear(hidden_size, action_size)
+        self.baseline_linear = nn.Linear(hidden_size, 1) # baseline is needed for reduce variance
 
         self.softmax = nn.Softmax(-1)
 
@@ -18,8 +19,9 @@ class controller(nn.Module):
         hidden_vector = self.input_linear(input_vector)
         output = self.output_linear(hidden_vector)
         output_softmax = self.softmax(output)
+        baseline = self.baseline_linear(hidden_vector)
 
-        return output_softmax
+        return output_softmax, baseline
 
 def choice_control(p):
     action_indices = torch.multinomial(p, num_samples=1)
